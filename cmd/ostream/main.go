@@ -79,6 +79,8 @@ func main() {
 						Usage: "refuse to take over from another connected consumer"},
 					&cli.StringFlag{Name: "decrypt-with",
 						Usage: "decrypt each line client-side with the named key"},
+					&cli.BoolFlag{Name: "once",
+						Usage: "exit on first connection end (don't reconnect)"},
 				},
 				Action: cmdTail,
 			},
@@ -238,27 +240,74 @@ func cmdTail(ctx context.Context, cmd *cli.Command) error {
 		NoKick: cmd.Bool("no-kick"),
 	}
 
-	// With --decrypt-with, the response body is base64url ciphertext
-	// (one per line). Route it through DecryptCopy instead of the
-	// plain io.Copy inside client.Tail.
+	// Optional client-side decryption.
+	var keyBytes []byte
 	if keyID := cmd.String("decrypt-with"); keyID != "" {
 		key, err := crypto.LoadKey(keyID)
 		if err != nil {
 			return fmt.Errorf("load key %q: %w", keyID, err)
 		}
-		kb, err := key.Bytes()
+		keyBytes, err = key.Bytes()
 		if err != nil {
 			return err
 		}
-		body, err := c.TailReader(ctx, path, opts)
-		if err != nil {
-			return err
-		}
-		defer body.Close()
-		return crypto.DecryptCopy(os.Stdout, body, kb)
 	}
 
-	return c.Tail(ctx, path, os.Stdout, opts)
+	once := cmd.Bool("once")
+
+	// Reconnection loop. Each iteration attempts one Tail request. A
+	// successful attempt runs to clean EOF (producer sent --eof, the
+	// server closed, or the connection dropped — we can't distinguish).
+	// We restart unless --once was set or the error is permanent
+	// (bad auth, conflict, etc).
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<attempt) * 500 * time.Millisecond
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+			fmt.Fprintf(os.Stderr, "tail: reconnecting in %s...\n", backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil
+			}
+		}
+
+		attemptErr := tailOnce(ctx, c, path, opts, keyBytes)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if once {
+			return attemptErr
+		}
+		if isPermanent(attemptErr) {
+			return attemptErr
+		}
+	}
+}
+
+func tailOnce(ctx context.Context, c *client.Client, path string, opts client.TailOpts, keyBytes []byte) error {
+	if keyBytes == nil {
+		return c.Tail(ctx, path, os.Stdout, opts)
+	}
+	body, err := c.TailReader(ctx, path, opts)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	return crypto.DecryptCopy(os.Stdout, body, keyBytes)
+}
+
+// isPermanent returns true for errors that a retry won't fix.
+func isPermanent(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, client.ErrUnauthorized) ||
+		errors.Is(err, client.ErrForbidden) ||
+		errors.Is(err, client.ErrNotFound) ||
+		errors.Is(err, client.ErrConflict)
 }
 
 func cmdKeygen(ctx context.Context, cmd *cli.Command) error {
