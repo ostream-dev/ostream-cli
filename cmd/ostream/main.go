@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -85,17 +86,44 @@ func main() {
 				Action: cmdTail,
 			},
 			{
-				Name:   "keygen",
-				Usage:  "generate a symmetric encryption key stored locally",
-				Flags: []cli.Flag{
-					&cli.StringFlag{Name: "id", Usage: "key identifier (default: random hex)"},
+				Name:  "key",
+				Usage: "manage local encryption keys",
+				Commands: []*cli.Command{
+					{
+						Name:  "gen",
+						Usage: "generate a new symmetric encryption key",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "id", Usage: "key identifier (default: random hex)"},
+						},
+						Action: cmdKeyGen,
+					},
+					{
+						Name:   "ls",
+						Usage:  "list local encryption key IDs",
+						Action: cmdKeyLs,
+					},
+					{
+						Name:      "show",
+						Usage:     "print a key's file contents (JSON) to stdout",
+						ArgsUsage: "<id>",
+						Action:    cmdKeyShow,
+					},
+					{
+						Name:  "add",
+						Usage: "import a key from stdin or a file",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "file", Aliases: []string{"f"},
+								Usage: "read the key JSON from this file (default: stdin)"},
+						},
+						Action: cmdKeyAdd,
+					},
+					{
+						Name:      "rm",
+						Usage:     "delete a key file",
+						ArgsUsage: "<id>",
+						Action:    cmdKeyRm,
+					},
 				},
-				Action: cmdKeygen,
-			},
-			{
-				Name:   "keys",
-				Usage:  "list local encryption key IDs",
-				Action: cmdKeys,
 			},
 			{
 				Name:   "path",
@@ -315,7 +343,7 @@ func isPermanent(err error) bool {
 		errors.Is(err, client.ErrConflict)
 }
 
-func cmdKeygen(ctx context.Context, cmd *cli.Command) error {
+func cmdKeyGen(ctx context.Context, cmd *cli.Command) error {
 	id := cmd.String("id")
 	if id == "" {
 		b := make([]byte, 4)
@@ -334,21 +362,87 @@ func cmdKeygen(ctx context.Context, cmd *cli.Command) error {
 	}
 	fmt.Fprintf(os.Stderr, "Generated key %q at %s\n", id, path)
 	fmt.Fprintln(os.Stderr, "Share the contents of that file out-of-band with anyone who needs to decrypt.")
+	fmt.Fprintln(os.Stderr, "To export:  ostream key show "+id)
 	return nil
 }
 
-func cmdKeys(ctx context.Context, cmd *cli.Command) error {
+func cmdKeyLs(ctx context.Context, cmd *cli.Command) error {
 	ids, err := crypto.ListKeys()
 	if err != nil {
 		return err
 	}
 	if len(ids) == 0 {
-		fmt.Fprintln(os.Stderr, "No local keys. Generate one with `ostream keygen`.")
+		fmt.Fprintln(os.Stderr, "No local keys. Generate one with `ostream key gen`.")
 		return nil
 	}
 	for _, id := range ids {
 		fmt.Println(id)
 	}
+	return nil
+}
+
+func cmdKeyShow(ctx context.Context, cmd *cli.Command) error {
+	id, err := requireArg(cmd, "id")
+	if err != nil {
+		return err
+	}
+	k, err := crypto.LoadKey(id)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(k, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(b))
+	return nil
+}
+
+func cmdKeyAdd(ctx context.Context, cmd *cli.Command) error {
+	var r io.Reader = os.Stdin
+	if f := cmd.String("file"); f != "" {
+		fh, err := os.Open(f)
+		if err != nil {
+			return err
+		}
+		defer fh.Close()
+		r = fh
+	}
+	var k crypto.Key
+	if err := json.NewDecoder(r).Decode(&k); err != nil {
+		return fmt.Errorf("parse key JSON: %w", err)
+	}
+	if k.ID == "" {
+		return errors.New("key JSON is missing an id")
+	}
+	if k.Algo != crypto.Algo {
+		return fmt.Errorf("key uses algo %q; only %q is supported", k.Algo, crypto.Algo)
+	}
+	// Round-trip the bytes to validate length.
+	if _, err := k.Bytes(); err != nil {
+		return err
+	}
+	path, err := crypto.SaveKey(&k)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Imported key %q at %s\n", k.ID, path)
+	return nil
+}
+
+func cmdKeyRm(ctx context.Context, cmd *cli.Command) error {
+	id, err := requireArg(cmd, "id")
+	if err != nil {
+		return err
+	}
+	path, err := crypto.KeyPath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Removed key %q (%s).\n", id, path)
 	return nil
 }
 

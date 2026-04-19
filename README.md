@@ -80,6 +80,33 @@ build_and_test.sh | ostream push --eof releases/v1
 When the producer finishes, any tailing consumer receives the remaining
 lines and then exits. Handy for one-shot scripts.
 
+### Encryption keys
+
+Mint a local symmetric key and use it to encrypt lines client-side:
+
+```sh
+ostream key gen --id myproject                  # generate a fresh key
+ostream key ls                                  # list ids
+ostream key show myproject                      # print the JSON (for export)
+echo hello | ostream push --encrypt-with myproject --eof secret-stream
+ostream tail --decrypt-with myproject --once secret-stream
+```
+
+To share the key with someone else (so they can decrypt):
+
+```sh
+# on sender:
+ostream key show myproject > myproject.key
+
+# transfer myproject.key via a trusted channel (scp, Signal, ...)
+
+# on receiver:
+ostream key add -f myproject.key                # or  cat myproject.key | ostream key add
+```
+
+Keys never leave your machine through ostream — the relay stores
+ciphertext only.
+
 ## Configuration
 
 Everything lives under `~/.ostream/` (on Windows, `%USERPROFILE%\.ostream\`).
