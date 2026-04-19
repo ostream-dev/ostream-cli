@@ -77,9 +77,24 @@ type TailOpts struct {
 // server closes the connection (EOF marker from a producer, a 4xx, or
 // network drop). The caller is responsible for reconnecting as desired.
 func (c *Client) Tail(ctx context.Context, path string, out io.Writer, opts TailOpts) error {
-	u, err := c.urlFor("/s/" + path)
+	body, err := c.TailReader(ctx, path, opts)
 	if err != nil {
 		return err
+	}
+	defer body.Close()
+	if _, err := io.Copy(out, body); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
+}
+
+// TailReader is like Tail but hands the response body back to the caller
+// so it can be processed line-by-line or post-processed (e.g. decrypted).
+// The caller MUST Close the returned ReadCloser.
+func (c *Client) TailReader(ctx context.Context, path string, opts TailOpts) (io.ReadCloser, error) {
+	u, err := c.urlFor("/s/" + path)
+	if err != nil {
+		return nil, err
 	}
 	q := u.Query()
 	if opts.Tail > 0 {
@@ -95,21 +110,18 @@ func (c *Client) Tail(ctx context.Context, path string, out io.Writer, opts Tail
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.auth(req)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer resp.Body.Close()
 	if err := statusError(resp); err != nil {
-		return err
+		resp.Body.Close()
+		return nil, err
 	}
-	if _, err := io.Copy(out, resp.Body); err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-	return nil
+	return resp.Body, nil
 }
 
 type Stream struct {

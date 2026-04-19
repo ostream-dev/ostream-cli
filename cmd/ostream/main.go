@@ -4,6 +4,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/ostream-dev/ostream-cli/internal/client"
 	"github.com/ostream-dev/ostream-cli/internal/config"
+	"github.com/ostream-dev/ostream-cli/internal/crypto"
 )
 
 // Set via -ldflags "-X main.version=..." at release time.
@@ -60,6 +63,8 @@ func main() {
 						Usage: "on clean disconnect, mark the stream terminated (consumers exit)"},
 					&cli.BoolFlag{Name: "tee", Aliases: []string{"t"},
 						Usage: "also copy stdin to stdout (like UNIX tee)"},
+					&cli.StringFlag{Name: "encrypt-with",
+						Usage: "encrypt each line client-side with the named key before upload"},
 				},
 				Action: cmdPush,
 			},
@@ -72,8 +77,23 @@ func main() {
 						Usage: "start from the last N buffered lines (default: all buffered)"},
 					&cli.BoolFlag{Name: "no-kick",
 						Usage: "refuse to take over from another connected consumer"},
+					&cli.StringFlag{Name: "decrypt-with",
+						Usage: "decrypt each line client-side with the named key"},
 				},
 				Action: cmdTail,
+			},
+			{
+				Name:   "keygen",
+				Usage:  "generate a symmetric encryption key stored locally",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "id", Usage: "key identifier (default: random hex)"},
+				},
+				Action: cmdKeygen,
+			},
+			{
+				Name:   "keys",
+				Usage:  "list local encryption key IDs",
+				Action: cmdKeys,
 			},
 			{
 				Name:   "ls",
@@ -182,10 +202,24 @@ func cmdPush(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	// Build the body reader. Order matters: tee must come before encrypt
+	// so the user sees plaintext locally, not ciphertext.
 	var body io.Reader = os.Stdin
 	if cmd.Bool("tee") {
-		body = io.TeeReader(os.Stdin, os.Stdout)
+		body = io.TeeReader(body, os.Stdout)
 	}
+	if keyID := cmd.String("encrypt-with"); keyID != "" {
+		key, err := crypto.LoadKey(keyID)
+		if err != nil {
+			return fmt.Errorf("load key %q: %w", keyID, err)
+		}
+		kb, err := key.Bytes()
+		if err != nil {
+			return err
+		}
+		body = crypto.EncryptingReader(body, kb)
+	}
+
 	return c.Push(ctx, path, body, client.PushOpts{EOF: cmd.Bool("eof")})
 }
 
@@ -198,10 +232,70 @@ func cmdTail(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	return c.Tail(ctx, path, os.Stdout, client.TailOpts{
+
+	opts := client.TailOpts{
 		Tail:   cmd.Int("tail"),
 		NoKick: cmd.Bool("no-kick"),
-	})
+	}
+
+	// With --decrypt-with, the response body is base64url ciphertext
+	// (one per line). Route it through DecryptCopy instead of the
+	// plain io.Copy inside client.Tail.
+	if keyID := cmd.String("decrypt-with"); keyID != "" {
+		key, err := crypto.LoadKey(keyID)
+		if err != nil {
+			return fmt.Errorf("load key %q: %w", keyID, err)
+		}
+		kb, err := key.Bytes()
+		if err != nil {
+			return err
+		}
+		body, err := c.TailReader(ctx, path, opts)
+		if err != nil {
+			return err
+		}
+		defer body.Close()
+		return crypto.DecryptCopy(os.Stdout, body, kb)
+	}
+
+	return c.Tail(ctx, path, os.Stdout, opts)
+}
+
+func cmdKeygen(ctx context.Context, cmd *cli.Command) error {
+	id := cmd.String("id")
+	if id == "" {
+		b := make([]byte, 4)
+		if _, err := rand.Read(b); err != nil {
+			return err
+		}
+		id = hex.EncodeToString(b)
+	}
+	k, err := crypto.GenerateKey(id)
+	if err != nil {
+		return err
+	}
+	path, err := crypto.SaveKey(k)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Generated key %q at %s\n", id, path)
+	fmt.Fprintln(os.Stderr, "Share the contents of that file out-of-band with anyone who needs to decrypt.")
+	return nil
+}
+
+func cmdKeys(ctx context.Context, cmd *cli.Command) error {
+	ids, err := crypto.ListKeys()
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		fmt.Fprintln(os.Stderr, "No local keys. Generate one with `ostream keygen`.")
+		return nil
+	}
+	for _, id := range ids {
+		fmt.Println(id)
+	}
+	return nil
 }
 
 // ------- ls / rm -------
