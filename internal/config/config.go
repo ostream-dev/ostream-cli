@@ -1,6 +1,6 @@
 // Package config loads and saves the ostream CLI's on-disk config.
 //
-// Layout: ~/.config/ostream/config.json, mode 0600.
+// Layout: $HOME/.ostream/config.json, mode 0600.
 // Overridable via the OSTREAM_TOKEN / OSTREAM_URL env vars.
 package config
 
@@ -11,6 +11,15 @@ import (
 	"os"
 	"path/filepath"
 )
+
+// Dir returns the ostream CLI's base config directory (~/.ostream).
+func Dir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("user home dir: %w", err)
+	}
+	return filepath.Join(home, ".ostream"), nil
+}
 
 const (
 	DefaultRelayURL = "https://ostream.dev"
@@ -93,9 +102,9 @@ func Clear() error {
 func Path() (string, error) { return path() }
 
 func path() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := Dir()
 	if err != nil {
-		return "", fmt.Errorf("user config dir: %w", err)
+		return "", err
 	}
-	return filepath.Join(dir, "ostream", "config.json"), nil
+	return filepath.Join(dir, "config.json"), nil
 }

@@ -1,6 +1,6 @@
 // Package crypto handles per-line ChaCha20-Poly1305 encryption for the CLI.
 //
-// Keys are stored locally as JSON under ~/.config/ostream/keys/<id>.json.
+// Keys are stored locally as JSON under $HOME/.ostream/keys/<id>.json.
 // The relay never sees plaintext or keys — encryption is entirely client-
 // side, symmetric, and by convention shared out-of-band.
 //
@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 
 	"golang.org/x/crypto/chacha20poly1305"
+
+	"github.com/ostream-dev/ostream-cli/internal/config"
 )
 
 const (
@@ -68,11 +70,11 @@ func GenerateKey(id string) (*Key, error) {
 
 // KeyDir returns the directory where key files are stored.
 func KeyDir() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := config.Dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "ostream", "keys"), nil
+	return filepath.Join(dir, "keys"), nil
 }
 
 // KeyPath returns the full file path for a given key ID.

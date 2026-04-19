@@ -98,6 +98,11 @@ func main() {
 				Action: cmdKeys,
 			},
 			{
+				Name:   "path",
+				Usage:  "print the config directory ($HOME/.ostream)",
+				Action: cmdPath,
+			},
+			{
 				Name:   "ls",
 				Usage:  "list your active streams",
 				Action: cmdLs,
@@ -344,6 +349,15 @@ func cmdKeys(ctx context.Context, cmd *cli.Command) error {
 	for _, id := range ids {
 		fmt.Println(id)
 	}
+	return nil
+}
+
+func cmdPath(ctx context.Context, cmd *cli.Command) error {
+	dir, err := config.Dir()
+	if err != nil {
+		return err
+	}
+	fmt.Println(dir)
 	return nil
 }
 

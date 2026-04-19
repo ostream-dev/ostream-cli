@@ -82,7 +82,16 @@ lines and then exits. Handy for one-shot scripts.
 
 ## Configuration
 
-Stored at `~/.config/ostream/config.json` (mode 0600).
+Everything lives under `~/.ostream/` (on Windows, `%USERPROFILE%\.ostream\`).
+
+```
+~/.ostream/
+├── config.json         # { token, relay_url }  mode 0600
+└── keys/               # encryption keys                 mode 0700
+    └── <id>.json       # one per key                     mode 0600
+```
+
+Run `ostream path` to print the exact directory.
 
 Environment overrides:
 
