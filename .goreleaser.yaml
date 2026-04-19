@@ -1,0 +1,78 @@
+version: 2
+
+project_name: ostream
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ostream
+    main: ./cmd/ostream
+    binary: ostream
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "ostream_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+
+release:
+  github:
+    owner: ostream-dev
+    name: ostream-cli
+  draft: false
+  prerelease: auto
+  name_template: "ostream {{ .Version }}"
+
+brews:
+  - name: ostream
+    repository:
+      owner: ostream-dev
+      name: homebrew-tap
+      branch: main
+      # The release workflow sets GITHUB_TOKEN to a PAT with write access to
+      # the tap repo (via the HOMEBREW_TAP_GITHUB_TOKEN repo secret).
+    homepage: "https://ostream.dev"
+    description: "Command-line client for ostream.dev — stream a pipe over HTTP"
+    license: "MIT"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "brew: {{ .ProjectName }} {{ .Tag }}"
+    install: |
+      bin.install "ostream"
+    test: |
+      system "#{bin}/ostream --version"

@@ -8,11 +8,23 @@ raw-`curl` API but with token management, friendlier flags, and more to come
 
 ## Install
 
+### Homebrew (macOS, Linux)
+
+```sh
+brew install ostream-dev/tap/ostream
+```
+
+### Prebuilt binary
+
+Grab a release archive from
+<https://github.com/ostream-dev/ostream-cli/releases> (darwin/linux/windows,
+amd64/arm64). Extract and move the `ostream` binary somewhere on your PATH.
+
+### From source
+
 ```sh
 go install github.com/ostream-dev/ostream-cli/cmd/ostream@latest
 ```
-
-Pre-built binaries and Homebrew formula TBD.
 
 ## Usage
 
@@ -81,14 +93,6 @@ Environment overrides:
 
 Also available as `--url` flag on the command line.
 
-## Roadmap
-
-- `--encrypt-with <key-id>` / `--decrypt-with <key-id>` — symmetric
-  end-to-end encryption (ChaCha20-Poly1305) so the relay never sees plaintext
-- `ostream keygen` — mint local encryption keys
-- Reconnection on transient drop (for `tail`)
-- Homebrew formula and release binaries
-
 ## License
 
-TBD.
+MIT. See [LICENSE](LICENSE).

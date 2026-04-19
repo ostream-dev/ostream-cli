@@ -1,6 +1,9 @@
 # Built binary (when running `go build` at the repo root)
 /ostream
 
+# GoReleaser output
+/dist/
+
 # Misc
 *.swp
 *.swo
