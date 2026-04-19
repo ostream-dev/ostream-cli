@@ -63,8 +63,11 @@ brews:
       owner: ostream-dev
       name: homebrew-tap
       branch: main
-      # The release workflow sets GITHUB_TOKEN to a PAT with write access to
-      # the tap repo (via the HOMEBREW_TAP_GITHUB_TOKEN repo secret).
+      # Default GITHUB_TOKEN is scoped to ostream-cli (so goreleaser can
+      # create the release there). Pushing the formula to the separate
+      # homebrew-tap repo needs a PAT with write access there, supplied
+      # via the HOMEBREW_TAP_GITHUB_TOKEN env var (from the repo secret).
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://ostream.dev"
     description: "Command-line client for ostream.dev — stream a pipe over HTTP"
     license: "MIT"

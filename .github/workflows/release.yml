@@ -27,8 +27,9 @@ jobs:
           version: '~> v2'
           args: release --clean
         env:
-          # Default token is scoped to THIS repo; goreleaser uses it for
-          # creating the GitHub release and uploading assets. Writing the
-          # Homebrew formula to a different repo needs a PAT with write
-          # access to ostream-dev/homebrew-tap, stored as the below secret.
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # Default GITHUB_TOKEN authorizes the release on this repo.
+          # The PAT (with write access to homebrew-tap) is picked up by
+          # .goreleaser.yaml's brews.repository.token template and used
+          # only for pushing the Formula — it needs no access here.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
