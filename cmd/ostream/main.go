@@ -57,13 +57,17 @@ func main() {
 			},
 			{
 				Name:      "push",
-				Usage:     "push stdin to a stream",
+				Usage:     "push stdin or a file to a stream",
 				ArgsUsage: "<path>",
 				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "file", Aliases: []string{"f"},
+						Usage: "read input from this file instead of stdin (implies --eof by default)"},
 					&cli.BoolFlag{Name: "eof", Aliases: []string{"e"},
-						Usage: "on clean disconnect, mark the stream terminated (consumers exit)"},
+						Usage: "mark the stream terminated on clean disconnect (default: true with --file, false with stdin)"},
+					&cli.BoolFlag{Name: "no-eof",
+						Usage: "explicitly disable end-of-stream marking (overrides --eof)"},
 					&cli.BoolFlag{Name: "tee", Aliases: []string{"t"},
-						Usage: "also copy stdin to stdout (like UNIX tee)"},
+						Usage: "also copy input to stdout (like UNIX tee)"},
 					&cli.StringFlag{Name: "encrypt-with",
 						Usage: "encrypt each line client-side with the named key before upload"},
 				},
@@ -71,9 +75,14 @@ func main() {
 			},
 			{
 				Name:      "tail",
-				Usage:     "stream from a stream to stdout",
+				Aliases:   []string{"pull"},
+				Usage:     "stream from a stream to stdout (or a file)",
 				ArgsUsage: "<path>",
 				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "file", Aliases: []string{"f"},
+						Usage: "append incoming lines to this file instead of stdout"},
+					&cli.BoolFlag{Name: "tee", Aliases: []string{"t"},
+						Usage: "with --file, also copy to stdout (like UNIX tee)"},
 					&cli.IntFlag{Name: "tail", Aliases: []string{"n"},
 						Usage: "start from the last N buffered lines (default: all buffered)"},
 					&cli.BoolFlag{Name: "no-kick",
@@ -237,9 +246,34 @@ func cmdPush(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// Build the body reader. Order matters: tee must come before encrypt
-	// so the user sees plaintext locally, not ciphertext.
-	var body io.Reader = os.Stdin
+	// Input: --file, else stdin.
+	var input io.Reader = os.Stdin
+	filePath := cmd.String("file")
+	if filePath != "" {
+		f, err := os.Open(filePath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		input = f
+	}
+
+	// Resolve EOF: --no-eof wins, then explicit --eof, else default true
+	// when reading a file (bounded input naturally ends) and false for
+	// stdin (usually a live pipe).
+	var eof bool
+	switch {
+	case cmd.Bool("no-eof"):
+		eof = false
+	case cmd.IsSet("eof"):
+		eof = cmd.Bool("eof")
+	default:
+		eof = filePath != ""
+	}
+
+	// Build the body reader. Order matters: tee before encrypt so the
+	// user sees plaintext locally, not ciphertext.
+	body := input
 	if cmd.Bool("tee") {
 		body = io.TeeReader(body, os.Stdout)
 	}
@@ -255,7 +289,7 @@ func cmdPush(ctx context.Context, cmd *cli.Command) error {
 		body = crypto.EncryptingReader(body, kb)
 	}
 
-	return c.Push(ctx, path, body, client.PushOpts{EOF: cmd.Bool("eof")})
+	return c.Push(ctx, path, body, client.PushOpts{EOF: eof})
 }
 
 func cmdTail(ctx context.Context, cmd *cli.Command) error {
@@ -271,6 +305,23 @@ func cmdTail(ctx context.Context, cmd *cli.Command) error {
 	opts := client.TailOpts{
 		Tail:   cmd.Int("tail"),
 		NoKick: cmd.Bool("no-kick"),
+	}
+
+	// Output destination: --file if set, else stdout. With --tee and
+	// --file, write to both.
+	var out io.Writer = os.Stdout
+	filePath := cmd.String("file")
+	if filePath != "" {
+		f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if cmd.Bool("tee") {
+			out = io.MultiWriter(f, os.Stdout)
+		} else {
+			out = f
+		}
 	}
 
 	// Optional client-side decryption.
@@ -307,7 +358,7 @@ func cmdTail(ctx context.Context, cmd *cli.Command) error {
 			}
 		}
 
-		attemptErr := tailOnce(ctx, c, path, opts, keyBytes)
+		attemptErr := tailOnce(ctx, c, path, opts, out, keyBytes)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -320,16 +371,16 @@ func cmdTail(ctx context.Context, cmd *cli.Command) error {
 	}
 }
 
-func tailOnce(ctx context.Context, c *client.Client, path string, opts client.TailOpts, keyBytes []byte) error {
+func tailOnce(ctx context.Context, c *client.Client, path string, opts client.TailOpts, out io.Writer, keyBytes []byte) error {
 	if keyBytes == nil {
-		return c.Tail(ctx, path, os.Stdout, opts)
+		return c.Tail(ctx, path, out, opts)
 	}
 	body, err := c.TailReader(ctx, path, opts)
 	if err != nil {
 		return err
 	}
 	defer body.Close()
-	return crypto.DecryptCopy(os.Stdout, body, keyBytes)
+	return crypto.DecryptCopy(out, body, keyBytes)
 }
 
 // isPermanent returns true for errors that a retry won't fix.

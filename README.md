@@ -46,8 +46,28 @@ Alternatively, set `OSTREAM_TOKEN` in your environment and skip the login step.
 make 2>&1 | ostream push --eof build
 
 # on consumer machine (or tab)
-ostream tail build
+ostream tail build         # aliased as `ostream pull`
 ```
+
+### Push from a file
+
+```sh
+ostream push -f transcript.log meeting-notes
+```
+
+`--eof` defaults to on when `-f` is used (files end, so terminating
+the stream fits). Pass `--no-eof` to keep the stream open after the
+file is exhausted — useful for appending later with a second push.
+
+### Tail to a file
+
+```sh
+ostream tail -f latest.log build
+ostream tail -f latest.log --tee build   # also stream to stdout
+```
+
+`--file` appends rather than truncates, so successive runs add to
+the same log.
 
 ### Tee — see locally while streaming
 
