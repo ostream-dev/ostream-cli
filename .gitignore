@@ -1,0 +1,9 @@
+# Built binary (when running `go build` at the repo root)
+/ostream
+
+# Misc
+*.swp
+*.swo
+.*.swp
+.*.swo
+.DS_Store
