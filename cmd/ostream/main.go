@@ -38,6 +38,10 @@ func main() {
 				Usage:   "relay base URL (overrides config and OSTREAM_URL)",
 				Sources: cli.EnvVars("OSTREAM_URL"),
 			},
+			&cli.StringFlag{
+				Name:  "token",
+				Usage: "API token for this invocation (overrides the saved token and OSTREAM_TOKEN)",
+			},
 		},
 		Commands: []*cli.Command{
 			{
@@ -164,8 +168,9 @@ func main() {
 	}
 }
 
-// buildClient loads the config, applies the --url override, and constructs
-// an HTTP client. Returns an error if a token is required but missing.
+// buildClient loads the config, applies --url / --token overrides, and
+// constructs an HTTP client. Returns an error if a token is required but
+// missing.
 func buildClient(cmd *cli.Command, requireToken bool) (*client.Client, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -174,8 +179,11 @@ func buildClient(cmd *cli.Command, requireToken bool) (*client.Client, error) {
 	if v := cmd.String("url"); v != "" {
 		cfg.RelayURL = v
 	}
+	if v := cmd.String("token"); v != "" {
+		cfg.Token = v
+	}
 	if requireToken && cfg.Token == "" {
-		return nil, errors.New("no API token — run `ostream login` or set OSTREAM_TOKEN")
+		return nil, errors.New("no API token — run `ostream login`, set OSTREAM_TOKEN, or pass --token")
 	}
 	return client.New(cfg.RelayURL, cfg.Token), nil
 }

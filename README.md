@@ -37,7 +37,10 @@ ostream login
 # paste the token when prompted
 ```
 
-Alternatively, set `OSTREAM_TOKEN` in your environment and skip the login step.
+Alternatively, set `OSTREAM_TOKEN` in your environment and skip the login
+step, or pass `--token <token>` on any individual command (handy for one-off
+use of a path-scoped key without overwriting the saved one). Precedence:
+`--token` flag > `OSTREAM_TOKEN` env > saved config.
 
 ### Push and tail
 
