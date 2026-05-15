@@ -88,6 +88,10 @@ ostream rm some/stream
 
 - `--tail=N` — start from the last N buffered lines (the rest are discarded).
 - `--no-kick` — if another consumer is connected, refuse to take over.
+- `--peek` — print the currently-buffered lines without draining them, then
+  exit. Combine with `--tail=N` for "show me just the last N." Multiple
+  `--peek` callers can run concurrently and won't disturb each other or an
+  active consumer.
 
 ### End of stream
 

@@ -71,6 +71,7 @@ type TailOpts struct {
 	Tail   int    // ?tail=N; zero means omit
 	NoKick bool   // ?kick=0
 	After  string // ?after=<stream-id>
+	Peek   bool   // ?peek=1 — non-consuming snapshot, server closes after delivery
 }
 
 // Tail streams from the given stream path to `out`. Returns when the
@@ -105,6 +106,9 @@ func (c *Client) TailReader(ctx context.Context, path string, opts TailOpts) (io
 	}
 	if opts.After != "" {
 		q.Set("after", opts.After)
+	}
+	if opts.Peek {
+		q.Set("peek", "1")
 	}
 	u.RawQuery = q.Encode()
 

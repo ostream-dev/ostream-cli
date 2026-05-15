@@ -91,6 +91,8 @@ func main() {
 						Usage: "decrypt each line client-side with the named key"},
 					&cli.BoolFlag{Name: "once",
 						Usage: "exit on first connection end (don't reconnect)"},
+					&cli.BoolFlag{Name: "peek",
+						Usage: "non-consuming snapshot: print currently-buffered lines without draining them, then exit (implies --once)"},
 				},
 				Action: cmdTail,
 			},
@@ -305,6 +307,7 @@ func cmdTail(ctx context.Context, cmd *cli.Command) error {
 	opts := client.TailOpts{
 		Tail:   cmd.Int("tail"),
 		NoKick: cmd.Bool("no-kick"),
+		Peek:   cmd.Bool("peek"),
 	}
 
 	// Output destination: --file if set, else stdout. With --tee and
@@ -337,7 +340,9 @@ func cmdTail(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	once := cmd.Bool("once")
+	// --peek delivers a finite snapshot and the server closes; reconnecting
+	// would just re-fetch and spin forever. Treat it as a single-shot.
+	once := cmd.Bool("once") || cmd.Bool("peek")
 
 	// Reconnection loop. Each iteration attempts one Tail request. A
 	// successful attempt runs to clean EOF (producer sent --eof, the
