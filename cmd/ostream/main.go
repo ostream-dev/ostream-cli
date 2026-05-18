@@ -143,6 +143,23 @@ func main() {
 				},
 			},
 			{
+				Name:      "metric",
+				Usage:     "post a one-line metric datapoint (thin wrapper over push)",
+				ArgsUsage: "<path> <key>=<value> [<key>=<value>...]",
+				Description: `Builds a single whitespace-separated key=value line and pushes it
+to <path>. Each non-` + "`t`" + ` key becomes a series in the dashboard chart at
+/charts/<path>. Optional t=<unix> overrides the x-axis.
+
+Examples:
+  ostream metric metrics/cpu a=12 b=34 c=56
+  ostream metric --ttl 7d metrics/sales total=42 region_us=20 region_eu=22`,
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "ttl",
+						Usage: "set per-stream retention (e.g. 30m, 12h, 7d, 2w)"},
+				},
+				Action: cmdMetric,
+			},
+			{
 				Name:   "path",
 				Usage:  "print the config directory ($HOME/.ostream)",
 				Action: cmdPath,
@@ -302,6 +319,33 @@ func cmdPush(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return c.Push(ctx, path, body, client.PushOpts{EOF: eof, TTL: cmd.String("ttl")})
+}
+
+func cmdMetric(ctx context.Context, cmd *cli.Command) error {
+	args := cmd.Args().Slice()
+	if len(args) < 2 {
+		return errors.New("usage: ostream metric <path> <key>=<value> [<key>=<value>...]")
+	}
+	path := args[0]
+	pairs := args[1:]
+
+	// Validate each pair so we fail before any network call. The relay
+	// doesn't enforce the format (it just stores lines), but if we silently
+	// pushed garbage it wouldn't show up on the chart and the user would
+	// have no signal why.
+	for _, p := range pairs {
+		eq := strings.IndexByte(p, '=')
+		if eq <= 0 {
+			return fmt.Errorf("metric arg %q is not key=value", p)
+		}
+	}
+
+	line := strings.Join(pairs, " ") + "\n"
+	c, err := buildClient(cmd, true)
+	if err != nil {
+		return err
+	}
+	return c.Push(ctx, path, strings.NewReader(line), client.PushOpts{TTL: cmd.String("ttl")})
 }
 
 func cmdTail(ctx context.Context, cmd *cli.Command) error {

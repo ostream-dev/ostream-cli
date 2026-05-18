@@ -65,6 +65,21 @@ Accepts Go duration syntax plus `d` (days) and `w` (weeks): `30m`,
 `12h`, `7d`, `2w`. The TTL is last-write-wins, so subsequent pushes
 inherit it until you set a different one. Plan tiers cap the maximum.
 
+### Post a metric
+
+```sh
+# Single datapoint with multiple series. Visit
+# https://app.ostream.dev/charts/<path> to see the chart.
+ostream metric metrics/cpu a=12 b=34 c=56
+
+# Combined with --ttl so the chart spans more than 30 minutes.
+ostream metric --ttl 7d metrics/sales total=42 region_us=20 region_eu=22
+```
+
+A thin wrapper over `push`: builds one whitespace-separated `key=value`
+line and posts it. Each non-`t` key becomes a chart series. Optional
+`t=<unix>` overrides the x-axis with your own timestamp.
+
 ### Push from a file
 
 ```sh
