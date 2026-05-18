@@ -74,6 +74,8 @@ func main() {
 						Usage: "also copy input to stdout (like UNIX tee)"},
 					&cli.StringFlag{Name: "encrypt-with",
 						Usage: "encrypt each line client-side with the named key before upload"},
+					&cli.StringFlag{Name: "ttl",
+						Usage: "set per-stream retention (e.g. 30m, 12h, 7d, 2w); applies to this and future content until changed"},
 				},
 				Action: cmdPush,
 			},
@@ -299,7 +301,7 @@ func cmdPush(ctx context.Context, cmd *cli.Command) error {
 		body = crypto.EncryptingReader(body, kb)
 	}
 
-	return c.Push(ctx, path, body, client.PushOpts{EOF: eof})
+	return c.Push(ctx, path, body, client.PushOpts{EOF: eof, TTL: cmd.String("ttl")})
 }
 
 func cmdTail(ctx context.Context, cmd *cli.Command) error {

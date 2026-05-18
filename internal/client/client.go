@@ -39,6 +39,10 @@ func New(baseURL, token string) *Client {
 
 type PushOpts struct {
 	EOF bool
+	// TTL, if non-empty, sets the per-stream retention via ?ttl=… on
+	// this push. Accepts Go duration syntax plus "d" (days) and "w"
+	// (weeks): "7d", "12h", "30m". Last-write-wins on the server.
+	TTL string
 }
 
 // Push streams `body` to the given stream path. Blocks until body returns
@@ -49,9 +53,14 @@ func (c *Client) Push(ctx context.Context, path string, body io.Reader, opts Pus
 	if err != nil {
 		return err
 	}
+	q := u.Query()
 	if opts.EOF {
-		q := u.Query()
 		q.Set("eof", "1")
+	}
+	if opts.TTL != "" {
+		q.Set("ttl", opts.TTL)
+	}
+	if len(q) > 0 {
 		u.RawQuery = q.Encode()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u.String(), body)

@@ -52,6 +52,19 @@ make 2>&1 | ostream push --eof build
 ostream tail build         # aliased as `ostream pull`
 ```
 
+### Set per-stream retention
+
+By default a stream is reaped after 30 minutes. To keep it longer
+(useful for metrics charts), pass `--ttl`:
+
+```sh
+echo "a=12 b=34" | ostream push --ttl 7d metrics/demo
+```
+
+Accepts Go duration syntax plus `d` (days) and `w` (weeks): `30m`,
+`12h`, `7d`, `2w`. The TTL is last-write-wins, so subsequent pushes
+inherit it until you set a different one. Plan tiers cap the maximum.
+
 ### Push from a file
 
 ```sh
