@@ -42,6 +42,10 @@ func main() {
 				Name:  "token",
 				Usage: "API token for this invocation (overrides the saved token and OSTREAM_TOKEN)",
 			},
+			&cli.StringFlag{
+				Name:  "profile",
+				Usage: "named saved profile to use (default: the configured default profile)",
+			},
 		},
 		Commands: []*cli.Command{
 			{
@@ -143,6 +147,35 @@ func main() {
 				},
 			},
 			{
+				Name:  "profile",
+				Usage: "manage named token profiles",
+				Commands: []*cli.Command{
+					{
+						Name:   "ls",
+						Usage:  "list saved profiles (the default is starred)",
+						Action: cmdProfileLs,
+					},
+					{
+						Name:      "use",
+						Usage:     "set the default profile",
+						ArgsUsage: "<name>",
+						Action:    cmdProfileUse,
+					},
+					{
+						Name:      "rm",
+						Usage:     "delete a profile",
+						ArgsUsage: "<name>",
+						Action:    cmdProfileRm,
+					},
+					{
+						Name:      "show",
+						Usage:     "print a profile's stored relay URL and whether it has a token (without revealing the token)",
+						ArgsUsage: "[<name>]",
+						Action:    cmdProfileShow,
+					},
+				},
+			},
+			{
 				Name:      "metric",
 				Usage:     "post a one-line metric datapoint (thin wrapper over push)",
 				ArgsUsage: "<path> <key>=<value> [<key>=<value>...]",
@@ -187,24 +220,28 @@ Examples:
 	}
 }
 
-// buildClient loads the config, applies --url / --token overrides, and
-// constructs an HTTP client. Returns an error if a token is required but
-// missing.
+// buildClient loads the config, resolves the active profile, applies
+// --url / --token overrides, and constructs an HTTP client. Returns an
+// error if a token is required but missing.
 func buildClient(cmd *cli.Command, requireToken bool) (*client.Client, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
+	p, _, err := cfg.Active(cmd.String("profile"))
+	if err != nil {
+		return nil, err
+	}
 	if v := cmd.String("url"); v != "" {
-		cfg.RelayURL = v
+		p.RelayURL = v
 	}
 	if v := cmd.String("token"); v != "" {
-		cfg.Token = v
+		p.Token = v
 	}
-	if requireToken && cfg.Token == "" {
+	if requireToken && p.Token == "" {
 		return nil, errors.New("no API token — run `ostream login`, set OSTREAM_TOKEN, or pass --token")
 	}
-	return client.New(cfg.RelayURL, cfg.Token), nil
+	return client.New(p.RelayURL, p.Token), nil
 }
 
 // ------- login / logout / token -------
@@ -223,12 +260,33 @@ func cmdLogin(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	cfg, _ := config.Load()
-	cfg.Token = token
+	name := cmd.String("profile")
+	if name == "" {
+		if cfg.DefaultProfile != "" {
+			name = cfg.DefaultProfile
+		} else {
+			name = config.DefaultName
+		}
+	}
+	url := cmd.String("url")
+	if url == "" {
+		// Preserve any prior RelayURL on this profile; otherwise default.
+		if existing, ok := cfg.Profiles[name]; ok {
+			url = existing.RelayURL
+		}
+	}
+	cfg.SetProfile(name, config.Profile{Token: token, RelayURL: url})
+	if cfg.DefaultProfile == "" {
+		cfg.DefaultProfile = name
+	}
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
 
-	// Sanity-check the token against the relay.
+	// Sanity-check the token against the relay using this same profile.
+	if err := cmd.Set("profile", name); err != nil {
+		return err
+	}
 	cli2, err := buildClient(cmd, true)
 	if err != nil {
 		return err
@@ -236,18 +294,33 @@ func cmdLogin(ctx context.Context, cmd *cli.Command) error {
 	qctx, cancel := client.QuickContext(ctx)
 	defer cancel()
 	if _, err := cli2.ListStreams(qctx); err != nil {
-		return fmt.Errorf("token saved, but relay rejected it: %w", err)
+		return fmt.Errorf("token saved (profile %q), but relay rejected it: %w", name, err)
 	}
 	p, _ := config.Path()
-	fmt.Fprintf(os.Stderr, "Saved token to %s\n", p)
+	fmt.Fprintf(os.Stderr, "Saved token to %s under profile %q\n", p, name)
 	return nil
 }
 
 func cmdLogout(ctx context.Context, cmd *cli.Command) error {
-	if err := config.Clear(); err != nil {
+	cfg, _ := config.Load()
+	name := cmd.String("profile")
+	if name == "" {
+		// No explicit profile: clear everything (matches the pre-profile
+		// behavior of `ostream logout`).
+		if err := config.Clear(); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "All saved profiles removed.")
+		return nil
+	}
+	if _, ok := cfg.Profiles[name]; !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+	cfg.RemoveProfile(name)
+	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr, "Token removed.")
+	fmt.Fprintf(os.Stderr, "Profile %q removed.\n", name)
 	return nil
 }
 
@@ -256,10 +329,116 @@ func cmdToken(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	if cfg.Token == "" {
-		return errors.New("no token saved")
+	p, name, err := cfg.Active(cmd.String("profile"))
+	if err != nil {
+		return err
 	}
-	fmt.Println(cfg.Token)
+	if p.Token == "" {
+		return fmt.Errorf("no token saved for profile %q", name)
+	}
+	fmt.Println(p.Token)
+	return nil
+}
+
+// ------- profile management -------
+
+func cmdProfileLs(ctx context.Context, cmd *cli.Command) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	names := cfg.ProfileNames()
+	if len(names) == 0 {
+		fmt.Fprintln(os.Stderr, "(no profiles saved — run `ostream login`)")
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	defer tw.Flush()
+	fmt.Fprintln(tw, "NAME\tDEFAULT\tRELAY URL")
+	for _, n := range names {
+		star := ""
+		if n == cfg.DefaultProfile {
+			star = "*"
+		}
+		url := cfg.Profiles[n].RelayURL
+		if url == "" {
+			url = "(default)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", n, star, url)
+	}
+	return nil
+}
+
+func cmdProfileUse(ctx context.Context, cmd *cli.Command) error {
+	name, err := requireArg(cmd, "name")
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if _, ok := cfg.Profiles[name]; !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+	cfg.DefaultProfile = name
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Default profile is now %q.\n", name)
+	return nil
+}
+
+func cmdProfileRm(ctx context.Context, cmd *cli.Command) error {
+	name, err := requireArg(cmd, "name")
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if _, ok := cfg.Profiles[name]; !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+	cfg.RemoveProfile(name)
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Profile %q removed.\n", name)
+	return nil
+}
+
+func cmdProfileShow(ctx context.Context, cmd *cli.Command) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	name := cmd.Args().First()
+	if name == "" {
+		name = cmd.String("profile")
+	}
+	if name == "" {
+		name = cfg.DefaultProfile
+	}
+	if name == "" {
+		return errors.New("no profile selected — pass a name or set a default with `ostream profile use`")
+	}
+	p, ok := cfg.Profiles[name]
+	if !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+	url := p.RelayURL
+	if url == "" {
+		url = config.DefaultRelayURL + " (implicit default)"
+	}
+	tokState := "no token"
+	if p.Token != "" {
+		tokState = "token present"
+	}
+	fmt.Printf("name:      %s%s\n", name, map[bool]string{true: " (default)"}[name == cfg.DefaultProfile])
+	fmt.Printf("relay url: %s\n", url)
+	fmt.Printf("token:     %s\n", tokState)
 	return nil
 }
 

@@ -40,7 +40,32 @@ ostream login
 Alternatively, set `OSTREAM_TOKEN` in your environment and skip the login
 step, or pass `--token <token>` on any individual command (handy for one-off
 use of a path-scoped key without overwriting the saved one). Precedence:
-`--token` flag > `OSTREAM_TOKEN` env > saved config.
+`--token` flag > `OSTREAM_TOKEN` env > active profile in saved config.
+
+### Multiple tokens (profiles)
+
+You can save several named tokens and switch between them:
+
+```sh
+ostream login --profile personal      # save as "personal"
+ostream login --profile work          # save as "work"
+ostream profile use personal          # set the default
+ostream profile ls                    # show all (default is starred)
+
+ostream --profile work push ci/build  # use a non-default profile for one command
+ostream --profile work tail ci/build
+```
+
+`ostream login` without `--profile` writes to the current default profile
+(or creates one called `default` if none exists). Existing single-token
+configs are auto-migrated to a `default` profile on first save.
+
+Inspect or remove:
+
+```sh
+ostream profile show work             # show relay URL + token presence (token itself stays hidden)
+ostream profile rm work
+```
 
 ### Push and tail
 
@@ -168,9 +193,9 @@ Everything lives under `~/.ostream/` (on Windows, `%USERPROFILE%\.ostream\`).
 
 ```
 ~/.ostream/
-├── config.json         # { token, relay_url }  mode 0600
-└── keys/               # encryption keys                 mode 0700
-    └── <id>.json       # one per key                     mode 0600
+├── config.json         # { default_profile, profiles{} }  mode 0600
+└── keys/               # encryption keys                  mode 0700
+    └── <id>.json       # one per key                      mode 0600
 ```
 
 Run `ostream path` to print the exact directory.
@@ -179,10 +204,11 @@ Environment overrides:
 
 | Var | Meaning |
 | --- | --- |
-| `OSTREAM_TOKEN` | API token (overrides the saved one) |
+| `OSTREAM_TOKEN` | API token (overrides the active profile's token) |
 | `OSTREAM_URL`   | Relay base URL (default `https://ostream.dev`) |
 
-Also available as `--url` flag on the command line.
+Also available as `--url` and `--token` flags. Use `--profile <name>` to
+pick a non-default profile for one command.
 
 ## License
 
